@@ -8,8 +8,13 @@
 //     opencode-native `model:`/`variant:` keys plus an added `mode: subagent`
 //     (so none registers as a primary agent), body token-substituted → .aidlc.
 //   - .opencode/command/aidlc.md — the user-invoked /aidlc entry (authored).
-//   - .opencode/plugin/aidlc-opencode-adapter.ts — the hook adapter (authored;
-//     opencode auto-discovers plugins from .opencode/plugin/).
+//   - .opencode/plugin/aidlc-opencode-adapter.ts — the opencode v1 hook
+//     adapter (authored; opencode 1.x auto-discovers plugins from
+//     .opencode/plugin/).
+//   - .opencode/plugins/aidlc-opencode-adapter.ts — the opencode v2 hook
+//     adapter (authored; opencode 2.x reads the default export's id+setup from
+//     plugins under .opencode/plugins/). V1 plugins are silently ignored by the
+//     v2 runtime, so the v2 adapter must ship beside it.
 //
 // WHY the engine is NOT inside .opencode/: opencode auto-imports every *.ts
 // under .opencode/tools/ and .opencode/tool/ as custom tool definitions, and
@@ -156,12 +161,24 @@ export default function emit(ctx: EmitContext): void {
     path: join(SHELL, "command", "aidlc.md"),
     content: () => substituteToken(readFileSync(join(harnessRoot, "command", "aidlc.md"), "utf-8")),
   });
+  // opencode v1 adapter (.opencode/plugin/ — v1 discovery dir).
   emissions.push({
     path: join(SHELL, "plugin", "aidlc-opencode-adapter.ts"),
     content: () =>
       substituteToken(
         embedShippedEntrypoints(
           readFileSync(join(harnessRoot, "plugin", "aidlc-opencode-adapter.ts"), "utf-8"),
+          distRoot,
+        ),
+      ),
+  });
+  // opencode v2 adapter (.opencode/plugins/ — v2 discovery dir).
+  emissions.push({
+    path: join(SHELL, "plugins", "aidlc-opencode-adapter.ts"),
+    content: () =>
+      substituteToken(
+        embedShippedEntrypoints(
+          readFileSync(join(harnessRoot, "plugin", "aidlc-opencode-adapter.v2.ts"), "utf-8"),
           distRoot,
         ),
       ),

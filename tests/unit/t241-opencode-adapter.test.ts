@@ -21,6 +21,10 @@ import { basename, dirname, join, relative } from "node:path";
 import createAdapter, {
   type PluginInput,
 } from "../../harness/opencode/plugin/aidlc-opencode-adapter.ts";
+import v2Plugin, {
+  createV2Adapter,
+  type AdapterContext,
+} from "../../harness/opencode/plugin/aidlc-opencode-adapter.v2.ts";
 import {
   createTestProject,
   seedAidlcMemory,
@@ -933,5 +937,205 @@ if (n === 0) process.stdout.write(JSON.stringify({ decision: "block", reason: "c
     });
 
     expect(readFileSync(stopCount, "utf-8")).toBe("2");
+  });
+});
+
+describe("t241b OpenCode v2 adapter", () => {
+  // The v2 adapter is a STRUCTURAL plugin ({id, setup}, no @opencode/plugin
+  // import), rewritten against the v2 hook API: prompt hook, tool hooks,
+  // event subscription, compaction. These tests drive the same factory the
+  // production `setup` uses so the logic is exercised once.
+
+  function v2Entrypoints() {
+    return new Set([
+      "tools/aidlc-orchestrate.ts",
+      "tools/aidlc-state.ts",
+      "tools/aidlc-utility.ts",
+      "hooks/aidlc-continue-workflow.ts",
+    ]);
+  }
+
+  function fakeV2Ctx(
+    root: string,
+    parentBySession: Record<string, string | undefined> = {},
+    entries?: ReadonlySet<string>,
+  ) {
+    const prompts: Array<{ id: string; text: string }> = [];
+    const ctx: AdapterContext = {
+      location: { directory: root },
+      session: {
+        get: async ({ sessionID }) =>
+          parentBySession[sessionID]
+            ? { parentID: parentBySession[sessionID] }
+            : {},
+        prompt: async ({ sessionID, text }) => {
+          prompts.push({ id: sessionID, text });
+        },
+        hook: async () => ({ dispose: async () => {} }),
+      },
+      tool: {
+        hook: async () => ({ dispose: async () => {} }),
+      },
+      event: {
+        subscribe: async function* () {
+          // Unused in these tests: idle is driven via adapter.onIdle directly.
+          return;
+        },
+      },
+      aidlcEntrypoints: entries ?? v2Entrypoints(),
+      aidlcCommand: [process.execPath, join(REPO_ROOT, "tests", "harness", "aidlc-hook-driver.ts")],
+    };
+    return { ctx, prompts };
+  }
+
+  test("default export binds the structural v2 plugin (id + setup)", () => {
+    expect(Object.keys(v2Plugin).sort()).toEqual(["id", "setup"]);
+    expect((v2Plugin as { id: string }).id).toBe("aidlc-opencode-adapter");
+    expect(typeof (v2Plugin as { setup: unknown }).setup).toBe("function");
+  });
+
+  test("prompt hook mints session-start then HUMAN_TURN for a main session", async () => {
+    const root = freshProject();
+    const minted = join(root, "minted");
+    const startCount = join(root, "start-count");
+    writeHook(
+      root,
+      "aidlc-session-start.ts",
+      `import { existsSync, readFileSync, writeFileSync } from "node:fs";
+const n = existsSync(${JSON.stringify(startCount)}) ? Number(readFileSync(${JSON.stringify(startCount)}, "utf-8")) : 0;
+writeFileSync(${JSON.stringify(startCount)}, String(n + 1), "utf-8");
+await Bun.stdin.text();
+process.stdout.write(JSON.stringify({ additionalContext: "active" }) + "\\n");
+`,
+    );
+    writeHook(
+      root,
+      "aidlc-record-human-turn.ts",
+      `import { appendFileSync } from "node:fs";
+await Bun.stdin.text();
+appendFileSync(${JSON.stringify(minted)}, "mint\\n");
+`,
+    );
+    const { ctx } = fakeV2Ctx(root, {});
+    const adapter = createV2Adapter(ctx);
+    await adapter.onPrompt({
+      sessionID: "main",
+      prompt: { text: "start a workflow" },
+    });
+    expect(readFileSync(startCount, "utf-8")).toBe("1");
+    expect(readFileSync(minted, "utf-8")).toContain("mint");
+  });
+
+  test("nudge sentinel never mints presence and child sessions never mint", async () => {
+    const root = freshProject();
+    const minted = join(root, "minted");
+    writeHook(
+      root,
+      "aidlc-session-start.ts",
+      "await Bun.stdin.text();\nprocess.stdout.write(JSON.stringify({ additionalContext: \"active\" }) + \"\\n\");\n",
+    );
+    writeHook(
+      root,
+      "aidlc-record-human-turn.ts",
+      `import { appendFileSync } from "node:fs";
+await Bun.stdin.text();
+appendFileSync(${JSON.stringify(minted)}, "mint\\n");
+`,
+    );
+    const { ctx } = fakeV2Ctx(root, { child: "main" });
+    const adapter = createV2Adapter(ctx);
+    // Plugin's own injected nudge must not record HUMAN presence.
+    await adapter.onPrompt({
+      sessionID: "main",
+      prompt: { text: "[aidlc-forwarding-nudge] continue" },
+    });
+    // A child (task-tool) session is a worker, never a human.
+    await adapter.onPrompt({ sessionID: "child", prompt: { text: "contribute" } });
+    expect(() => readFileSync(minted, "utf-8")).toThrow();
+  });
+
+  test("execute.before (v2 shell tool) rejects compound aidlc command while leaving one invocation", async () => {
+    const root = freshProject();
+    const { ctx } = fakeV2Ctx(root, {});
+    const adapter = createV2Adapter(ctx);
+    const before = (toolInput: Record<string, unknown>) =>
+      adapter.onExecuteBefore({
+        tool: "shell",
+        sessionID: "main",
+        id: "c1",
+        agent: "primary",
+        input: toolInput,
+      });
+    await expect(
+      before({ command: "aidlc engine status && touch /tmp/x" }),
+    ).rejects.toThrow("one direct invocation");
+    await expect(before({ command: "aidlc engine status" })).resolves.toBeUndefined();
+  });
+
+  test("execute.after sinks write audit then sensors like the v1 writable", async () => {
+    const root = freshProject();
+    const trace = join(root, "hook-calls.ndjson");
+    for (const [file, label] of [
+      ["aidlc-write-audit-log.ts", "audit"],
+      ["aidlc-run-sensors.ts", "sensor"],
+    ] as const) {
+      writeHook(
+        root,
+        file,
+        `import { appendFileSync } from "node:fs";
+const input = await Bun.stdin.text();
+appendFileSync(${JSON.stringify(trace)}, ${JSON.stringify(`${label}\t`)} + input + "\\n", "utf-8");
+`,
+      );
+    }
+    const { ctx } = fakeV2Ctx(root, {});
+    const adapter = createV2Adapter(ctx);
+    // v2 names the write tool "write"; the audit path is tool-agnostic.
+    await adapter.onExecuteAfter({
+      tool: "write",
+      sessionID: "main",
+      id: "w",
+      status: "completed",
+      input: { filePath: "src/one.ts" },
+      result: "ok",
+    });
+    const calls = readFileSync(trace, "utf-8")
+      .trim()
+      .split("\n")
+      .map((line) => line.split("\t", 2)[0]);
+    expect(calls).toEqual(["audit", "sensor"]);
+  });
+
+  test("session.idle event stable order: continue-workflow then nudge prompt", async () => {
+    const root = freshProject();
+    const stopCount = join(root, "stop-count");
+    writeHook(
+      root,
+      "aidlc-session-start.ts",
+      "await Bun.stdin.text();\nprocess.stdout.write(JSON.stringify({ additionalContext: \"active\" }) + \"\\n\");\n",
+    );
+    writeHook(root, "aidlc-record-human-turn.ts", "await Bun.stdin.text();\n");
+    writeHook(
+      root,
+      "aidlc-continue-workflow.ts",
+      `import { existsSync, readFileSync, writeFileSync } from "node:fs";
+const countFile = ${JSON.stringify(stopCount)};
+const n = existsSync(countFile) ? Number(readFileSync(countFile, "utf-8")) : 0;
+writeFileSync(countFile, String(n + 1), "utf-8");
+await Bun.stdin.text();
+process.stdout.write(JSON.stringify({ decision: "block", reason: "continue" }) + "\\n");
+`,
+    );
+    const { ctx, prompts } = fakeV2Ctx(root, {});
+    const adapter = createV2Adapter(ctx);
+    await adapter.onPrompt({ sessionID: "main", prompt: { text: "start" } });
+    // v2 idle event carries the session under data.sessionID.
+    await adapter.onIdle({
+      type: "session.idle",
+      data: { sessionID: "main" },
+    });
+    expect(readFileSync(stopCount, "utf-8")).toBe("1");
+    expect(prompts).toHaveLength(1);
+    expect(prompts[0].text).toContain("[aidlc-forwarding-nudge]");
   });
 });

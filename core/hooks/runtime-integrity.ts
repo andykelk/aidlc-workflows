@@ -1174,6 +1174,7 @@ function protectedInstalledPath(path: unknown, cwd: string, ancestors = false): 
   // These native hook entrypoints live beside the shared .aidlc engine.
   const entrypoints = [
     resolve(cwd, ".opencode/plugin/aidlc-opencode-adapter.ts"),
+    resolve(cwd, ".opencode/plugins/aidlc-opencode-adapter.ts"),
     resolve(cwd, ".github/hooks/aidlc.json"),
     ...(isCompiledModuleUrl(import.meta.url) ? [process.execPath] : []),
   ];

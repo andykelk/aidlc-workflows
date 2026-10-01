@@ -26,15 +26,23 @@ script (top-level dispatch, `process.exit`) crashes the session
   orchestrator skill and every generated runner are discovered there.
 - **`.opencode/`** — only natively-consumed surfaces: the 14 persona
   subagents (`agents/*.md`, `mode: subagent`), the `/aidlc` command
-  (`command/aidlc.md`), and the hook-adapter plugin
-  (`plugin/aidlc-opencode-adapter.ts`, auto-discovered by opencode).
+  (`command/aidlc.md`), and the hook-adapter plugins
+  (`plugin/aidlc-opencode-adapter.ts` for opencode v1 and
+  `plugins/aidlc-opencode-adapter.ts` for opencode v2, each auto-discovered in
+  its version's plugin dir).
 
 ## Prerequisites
 
-- **opencode ≥ 1.17** — the plugin hook surface this install relies on
-  (`tool.execute.before`, `tool.execute.after`, `chat.message`, `session.idle`,
-  `experimental.session.compacting`) and project-local skill/agent discovery.
-  Check with `opencode --version`.
+- **opencode v2 (verified 2.0.20)** — the recommended target. The default
+  install (`curl -fsSL https://opencode.ai/v2/install | bash`) is v2, where V1
+  plugin implementations do not run, so the human-presence gate would fail
+  closed without the v2 adapter along for the ride. Check with
+  `opencode --version`.
+- **or pin opencode v1 (verified 1.17.18)** if you need the V1 plugin surface
+  (the `chat.message`, `tool.execute.before/after`, `session.idle` event, and
+  `experimental.session.compacting` hooks the v1 adapter maps). Note that plain
+  V1 object entrypoints are only recognized from opencode **1.18.29+**, so the
+  safest documented v1 target is the verified **1.17.18** build.
 - **bun** only when generating or running the source/development `dist/`
   projection. Native installs and versioned release runtimes dispatch through
   the installed `aidlc` executable.
@@ -144,13 +152,18 @@ the project.
   widget); the questions FILE with `[Answer]:` tags remains the source of
   truth.
 - **Hooks ride the adapter plugin.** opencode has no hooks.json/settings hook
-  registry; `.opencode/plugin/aidlc-opencode-adapter.ts` maps opencode's
+  registry; `.opencode/plugin/aidlc-opencode-adapter.ts` (opencode v1) or
+  `.opencode/plugins/aidlc-opencode-adapter.ts` (opencode v2) maps opencode's
   plugin hook moments onto the core hook bodies in `.aidlc/hooks/` (run as bun
   subprocesses): reviewer read-scope and the AIDLC bash boundary before tool
   execution; audit + sensors on write/edit/apply_patch; rebuild-stage-graph on
-  bash, which also shows an engine error's exact message as a TUI toast;
-  statusline sync on todowrite; subagent logging on task; presence
-  minting on each human turn; state validation before compaction.
+  bash; statusline sync on todowrite; subagent logging on task; presence
+  minting on each human turn; state validation before compaction. The v2
+  adapter is a structurally-defined plugin (`{ id, setup }`, no
+  `@opencode/plugin` import) registered against the v2 prompt/tool/compaction
+  hooks and event subscription; it stamps the real `ses_...` session as
+  workflow owner on the first turn, so `active-directive.json` never degrades
+  to a `sessionless:` owner on v2.
 - **Forwarding-loop enforcement is advisory.** The Stop seam is the
   `session.idle` event — reactive, not blocking. When the core stop hook
   answers `block`, the plugin re-engages the loop by injecting a nudge prompt
@@ -181,6 +194,7 @@ bun .aidlc/tools/aidlc-utility.ts doctor   # source/development copy
 opencode run --command aidlc -- "--status"  # /aidlc --status through the harness
 ```
 
-The doctor's opencode-specific checks: the adapter plugin present at
-`.opencode/plugin/`, a project-root `opencode.json` or `opencode.jsonc`
+The doctor's opencode-specific checks: an adapter plugin present (v1 at
+`.opencode/plugin/` or v2 at `.opencode/plugins/`), a project-root
+`opencode.json`/`opencode.jsonc`
 present, and `.opencode/command/aidlc.md` present.

@@ -3455,8 +3455,10 @@ export async function collectDoctorReport(
         } catch {
           nativePermission = false;
         }
-        nativeHooks = existsSync(
-          join(projectDir, ".opencode", "plugin", "aidlc-opencode-adapter.ts"),
+        nativeHooks = ["plugin", "plugins"].some((dir) =>
+          existsSync(
+            join(projectDir, ".opencode", dir, "aidlc-opencode-adapter.ts"),
+          ),
         );
       }
       const nativeTrustReady = legacy.length === 0 && nativeHooks && nativePermission;
@@ -3870,13 +3872,18 @@ export async function collectDoctorReport(
           ),
         });
       } else {
-        const adapterPath = join(projectDir, ".opencode", "plugin", "aidlc-opencode-adapter.ts");
+        // opencode ships two adapters: the v1 plugin (.opencode/plugin/) and the
+        // v2 plugin (.opencode/plugins/). v2 ignores v1 plugins, so the v2
+        // adapter is the canonical wiring on the default v2 install; the v1 file
+        // remains for pinned v1 users. Either satisfies the hook-wiring row.
+        const adapterV1 = join(projectDir, ".opencode", "plugin", "aidlc-opencode-adapter.ts");
+        const adapterV2 = join(projectDir, ".opencode", "plugins", "aidlc-opencode-adapter.ts");
         results.push({
-          pass: existsSync(adapterPath),
-          label: "plugin/aidlc-opencode-adapter.ts present (hook wiring)",
+          pass: existsSync(adapterV1) || existsSync(adapterV2),
+          label: "opencode adapter plugin present (v1 or v2 hook wiring)",
           fix: projectedFileRepair(
             "opencode",
-            ".opencode/plugin/aidlc-opencode-adapter.ts",
+            ".opencode/plugins/aidlc-opencode-adapter.ts",
           ),
         });
       }

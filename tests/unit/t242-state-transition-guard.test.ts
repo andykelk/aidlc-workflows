@@ -1460,6 +1460,7 @@ describe("t242 state-transition ownership guard", () => {
       ".cursor/hooks/aidlc-cursor-adapter.ts",
       ".aidlc/hooks/aidlc-copilot-adapter.ts",
       ".opencode/plugin/aidlc-opencode-adapter.ts",
+      ".opencode/plugins/aidlc-opencode-adapter.ts",
       ".claude/tools/aidlc.ts",
       ".claude/tools/aidlc-lib.ts",
       ".claude/tools/aidlc-guard-switch.ts",

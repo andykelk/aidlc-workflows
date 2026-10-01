@@ -124,16 +124,21 @@ describe("t240 dist/opencode packaging parity + shell shape", () => {
   });
 
   test("3: the .opencode shell holds ONLY the native emissions — no engine .ts opencode would auto-import", () => {
-    // Top-level shape: exactly the three natively-consumed dirs.
-    expect(readdirSync(SHELL).sort()).toEqual(["agents", "command", "plugin"]);
+    // Top-level shape: exactly the native emissions dirs, including the v2
+    // plugin dir (.opencode/plugins/) beside the v1 dir (.opencode/plugin/).
+    expect(readdirSync(SHELL).sort()).toEqual(["agents", "command", "plugin", "plugins"]);
     // The tool-scan trap: opencode imports .opencode/tool/*.ts and
     // .opencode/tools/*.ts as custom tools. Neither dir may ever appear.
     expect(existsSync(join(SHELL, "tools"))).toBe(false);
     expect(existsSync(join(SHELL, "tool"))).toBe(false);
-    // The one .ts in the shell is the adapter plugin (opencode loads plugins
-    // in-process as modules, so a plugin-shaped file is safe there).
+    // The only .ts files in the shell are the two adapter plugins (opencode
+    // loads plugins in-process as modules, so plugin-shaped files are safe
+    // there): the v1 adapter and the v2 adapter.
     const tsFiles = [...walk(SHELL)].filter((f) => f.endsWith(".ts"));
-    expect(tsFiles).toEqual([join(SHELL, "plugin", "aidlc-opencode-adapter.ts")]);
+    expect(tsFiles.sort()).toEqual([
+      join(SHELL, "plugin", "aidlc-opencode-adapter.ts"),
+      join(SHELL, "plugins", "aidlc-opencode-adapter.ts"),
+    ]);
   });
 
   test("4: every emitted subagent twin is mode: subagent with the projected tier keys", () => {

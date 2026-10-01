@@ -2,8 +2,9 @@
 //
 // Projects the harness-neutral core/ tree into dist/opencode/.aidlc/ and defers
 // every opencode-native surface to emit.ts (the .opencode/ shell: subagent .md
-// files, the /aidlc command, the hook-adapter plugin). Verified live against
-// opencode 1.17.18.
+// files, the /aidlc command, the hook-adapter plugins). The v1 adapter is
+// verified live against opencode 1.17.18; the v2 adapter targets opencode
+// 2.0.20 (the default install).
 //
 // opencode specifics vs Claude:
 //   - token → .aidlc, NOT .opencode. opencode auto-imports every *.ts under
@@ -16,9 +17,9 @@
 //   - .opencode/ carries ONLY natively-consumed emissions (emit.ts): the 14
 //     persona subagents (.opencode/agents/*.md, mode: subagent + projected
 //     tier keys), the /aidlc command (.opencode/command/aidlc.md), and the
-//     hook-adapter plugin (.opencode/plugin/aidlc-opencode-adapter.ts, the
-//     auto-discovered plugin seam mapping opencode hook moments onto the core
-//     hook bodies in .aidlc/hooks/).
+//     hook-adapter plugins (.opencode/plugin/aidlc-opencode-adapter.ts, the V1
+//     auto-discovered seam, plus .opencode/plugins/aidlc-opencode-adapter.ts,
+//     the V2 structurally-defined seam — V2 ignores V1 plugins, so both ship).
 //   - the method tree reaches ambient context via the `instructions` glob in
 //     the shipped opencode.json ("aidlc/spaces/default/memory/**/*.md",
 //     live-verified) — opencode's native include surface, re-pointed on a
